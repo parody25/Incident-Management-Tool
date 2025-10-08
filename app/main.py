@@ -55,13 +55,20 @@ def init_db():
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='incidents'")
     exists = cursor.fetchone()
     if exists:
-        # Check column count
+        # Check if we have the required columns
         cursor.execute("PRAGMA table_info(incidents)")
         columns = cursor.fetchall()
-        if len(columns) != 8:  # Simplified schema
-            logger.info("Dropping old incidents table due to schema mismatch")
-            cursor.execute("DROP TABLE incidents")
+        column_names = [col[1] for col in columns]
+        required_columns = ['id', 'Incident_Number', 'Description', 'Detailed_Description', 'Resolution', 'Reported_Date', 'Computed_Priority', 'Description_Embedding', 'User_Name', 'Department']
+        if not all(col in column_names for col in required_columns):
+            logger.info("Updating schema to add missing columns")
+            if 'User_Name' not in column_names:
+                cursor.execute("ALTER TABLE incidents ADD COLUMN User_Name TEXT")
+            if 'Department' not in column_names:
+                cursor.execute("ALTER TABLE incidents ADD COLUMN Department TEXT")
             conn.commit()
+        else:
+            logger.info("Schema is up to date")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS incidents (
@@ -72,7 +79,9 @@ def init_db():
             Resolution TEXT,
             Reported_Date TEXT,
             Computed_Priority INTEGER,
-            Description_Embedding TEXT
+            Description_Embedding TEXT,
+            User_Name TEXT,
+            Department TEXT
         )
     """)
     conn.commit()

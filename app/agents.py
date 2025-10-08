@@ -142,8 +142,8 @@ class DatabaseAgent(BaseAgent):
             emb_json = json.dumps(embedding)
             cursor.execute("""
                 INSERT INTO incidents
-                (Incident_Number, Description, Detailed_Description, Reported_Date, Resolution, Computed_Priority, Description_Embedding)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (Incident_Number, Description, Detailed_Description, Reported_Date, Resolution, Computed_Priority, Description_Embedding, User_Name, Department)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 incident.incident_num,
                 incident.description,
@@ -151,7 +151,9 @@ class DatabaseAgent(BaseAgent):
                 incident.reported_date,
                 solution,
                 priority,
-                emb_json
+                emb_json,
+                incident.customer_name,
+                incident.department
             ))
             conn.commit()
             conn.close()

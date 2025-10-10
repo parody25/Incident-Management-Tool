@@ -110,29 +110,9 @@ def login_page():
             else:
                 st.error("Please enter both username and password")
 
-def main():
-    st.set_page_config(
-        page_title="Incident Management Chat Bot",
-        page_icon="🛠️",
-        layout="centered",
-        initial_sidebar_state="collapsed"
-    )
-
-    # Check if user is logged in
-    if "logged_in" not in st.session_state or not st.session_state.logged_in:
-        login_page()
-        return
-
-    st.title("🛠️ Incident Management System")
-    st.markdown(f"Welcome, **{st.session_state.username}**! Provide the incident details below and we'll process it automatically.")
-
-    # Sidebar for logout
-    with st.sidebar:
-        st.write(f"Logged in as: {st.session_state.username}")
-        if st.button("Logout"):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.rerun()
+def create_incident_page():
+    st.title("📝 Create New Incident")
+    st.markdown("Provide the incident details below and we'll process it automatically.")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
@@ -198,6 +178,189 @@ def main():
                 st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
 
         st.rerun()
+
+def browse_incidents_page():
+    st.title("🔍 Browse Incidents")
+
+    # Initialize session state for filters applied
+    if "filters_applied" not in st.session_state:
+        st.session_state.filters_applied = False
+
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        filter_department = st.selectbox("Department", ["All", "IT Support", "Network", "Security", "Database", "Application", "Infrastructure"])
+    with col2:
+        filter_status = st.selectbox("Status", ["All", "Open", "Resolved", "Closed", "Pending"])
+    with col3:
+        filter_priority = st.selectbox("Priority", ["All", "1", "2", "3", "4", "5"])
+
+    # Date filters
+    col4, col5 = st.columns(2)
+    with col4:
+        date_from = st.date_input("From Date", value=None)
+    with col5:
+        date_to = st.date_input("To Date", value=None)
+
+    if st.button("Apply Filters"):
+        st.session_state.filters_applied = True
+        st.rerun()
+
+    # Only fetch and display incidents if filters have been applied
+    if not st.session_state.filters_applied:
+        st.info("Please select your filters and click 'Apply Filters' to search for incidents.")
+        return
+
+    # Fetch incidents only after filters are applied
+    params = {}
+    if filter_department != "All":
+        params["department"] = filter_department
+    if filter_status != "All":
+        params["status"] = filter_status
+    if filter_priority != "All":
+        params["priority"] = int(filter_priority)
+    if date_from:
+        params["date_from"] = date_from.isoformat()
+    if date_to:
+        params["date_to"] = date_to.isoformat()
+
+    try:
+        response = requests.get("http://localhost:8000/incidents", params=params)
+        response.raise_for_status()
+        incidents = response.json()
+    except Exception as e:
+        st.error(f"Error fetching incidents: {e}")
+        return
+
+    if not incidents:
+        st.info("No incidents found with the selected filters.")
+        return
+
+    # Display incidents in a table
+    import pandas as pd
+    df = pd.DataFrame(incidents)
+    df = df.rename(columns={
+        "incident_number": "Incident_Number",
+        "description": "Short_Description",
+        "department": "Department",
+        "computed_priority": "Priority",
+        "user_name": "User",
+        "status": "Status",
+        "reported_date": "Reported"
+    })
+    df["Reported"] = pd.to_datetime(df["Reported"]).dt.date
+
+    # Show the dataframe
+    st.dataframe(df[["Incident_Number", "Short_Description", "Department", "Priority", "User", "Status", "Reported"]], use_container_width=True)
+
+    # Since st.dataframe doesn't support links that trigger streamlit actions, use buttons
+    for inc in incidents:
+        if st.button(f"View {inc['incident_number']}", key=inc['incident_number']):
+            st.session_state.page = "incident_detail"
+            st.session_state.selected_incident = inc['incident_number']
+            st.rerun()
+
+def incident_detail_page(incident_num):
+    st.title(f"📋 Incident Details: {incident_num}")
+
+    # Fetch incident details
+    try:
+        response = requests.get(f"http://localhost:8000/incidents/{incident_num}")
+        response.raise_for_status()
+        incident = response.json()
+    except Exception as e:
+        st.error(f"Error fetching incident: {e}")
+        return
+
+    # Display incident info
+    st.subheader("Incident Information")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(f"**Description:** {incident['description']}")
+        st.write(f"**Department:** {incident['department']}")
+        st.write(f"**Status:** {incident['status']}")
+    with col2:
+        st.write(f"**Priority:** {incident['computed_priority']}")
+        st.write(f"**User:** {incident['user_name']}")
+        st.write(f"**Reported:** {incident['reported_date']}")
+
+    st.subheader("Detailed Description")
+    st.write(incident['detailed_description'])
+
+    st.subheader("Resolution")
+    st.write(incident['resolution'])
+
+    # Update form
+    st.subheader("Update Incident")
+    with st.form("update_form"):
+        new_status = st.selectbox("New Status", ["Open", "Pending", "Resolved", "Closed"], index=["Open", "Pending", "Resolved", "Closed"].index(incident['status']))
+        new_resolution = st.text_area("Update Resolution", value=incident['resolution'])
+        update_button = st.form_submit_button("Update Incident")
+
+    if update_button:
+        # Check if changed
+        if new_status != incident['status'] or new_resolution != incident['resolution']:
+            payload = {}
+            if new_status != incident['status']:
+                payload["status"] = new_status
+            if new_resolution != incident['resolution']:
+                payload["resolution"] = new_resolution
+            try:
+                response = requests.put(f"http://localhost:8000/incidents/{incident_num}", json=payload)
+                response.raise_for_status()
+                st.success("Incident updated successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error updating incident: {e}")
+        else:
+            st.info("No changes made.")
+
+    if st.button("← Back to Browse"):
+        st.session_state.page = "browse"
+        st.rerun()
+
+def main():
+    st.set_page_config(
+        page_title="Incident Management System",
+        page_icon="🛠️",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+
+    # Check if user is logged in
+    if "logged_in" not in st.session_state or not st.session_state.logged_in:
+        login_page()
+        return
+
+    # Sidebar navigation
+    with st.sidebar:
+        st.write(f"Logged in as: {st.session_state.username}")
+        
+        if st.button("📝 Create Incident"):
+            st.session_state.page = "create"
+            st.rerun()
+        if st.button("🔍 Browse Incidents"):
+            st.session_state.page = "browse"
+            st.rerun()
+        if st.button("Logout"):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.rerun()
+
+    # Page navigation
+    page = st.session_state.get("page", "create")
+    
+    if page == "create":
+        create_incident_page()
+    elif page == "browse":
+        browse_incidents_page()
+    elif page == "incident_detail":
+        incident_num = st.session_state.get("selected_incident")
+        if incident_num:
+            incident_detail_page(incident_num)
+        else:
+            st.error("No incident selected")
+            browse_incidents_page()
 
 if __name__ == "__main__":
     main()
